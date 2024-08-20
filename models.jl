@@ -14,7 +14,11 @@ sunspots = data[:, 2]
 mean_sunspots, std_sunspots = mean(sunspots), std(sunspots)
 normalized_sunspots = (sunspots .- mean_sunspots) ./ std_sunspots
 
-train_zs = Int(0.8 * length(normalized_sunspots))
+# Keep the last value for final verification
+final_value = normalized_sunspots[end]
+normalized_sunspots = normalized_sunspots[1:end-1]
+
+train_zs = floor(Int, 0.8 * length(normalized_sunspots))  # Use floor to ensure integer
 train_data = normalized_sunspots[1:train_zs]
 test_data = normalized_sunspots[train_zs+1:end]
 
@@ -26,26 +30,20 @@ function run_experiment(seed)
     loss_ffnn(x, y) = Flux.Losses.mse(ffnn_model(x), y)
     learning_rate = 0.12
     opt_ffnn = Flux.Adam(learning_rate)
-
     X_train_ffnn = reshape(train_data[1:end-1], 1, :)
     y_train_ffnn = reshape(train_data[2:end], 1, :)
-
     Flux.train!(loss_ffnn, Flux.params(ffnn_model), [(X_train_ffnn, y_train_ffnn)], opt_ffnn)
-
     X_test_ffnn = reshape(test_data[1:end-1], 1, :)
     pred_ffnn = vec(ffnn_model(X_test_ffnn))
 
     # RNN Model
     rnn_model = Chain(Flux.RNN(1 => 10, tanh), Dense(10, 1))
     loss_rnn(x, y) = Flux.Losses.mse(rnn_model(x), y)
-    learning_rate = 0.03
+    learning_rate = 0.004
     opt_rnn = Flux.Adam(learning_rate)
-
     X_train_rnn = reshape(train_data[1:end-1], 1, :)
     y_train_rnn = reshape(train_data[2:end], 1, :)
-
     Flux.train!(loss_rnn, Flux.params(rnn_model), [(X_train_rnn, y_train_rnn)], opt_rnn)
-
     X_test_rnn = reshape(test_data[1:end-1], 1, :)
     Flux.reset!(rnn_model)
     pred_rnn = vec(rnn_model(X_test_rnn))
@@ -54,18 +52,31 @@ function run_experiment(seed)
     mse_ffnn = Flux.Losses.mse(pred_ffnn, test_data[2:end])
     mse_rnn = Flux.Losses.mse(pred_rnn, test_data[2:end])
 
-    return pred_ffnn, pred_rnn, mse_ffnn, mse_rnn
+    return pred_ffnn, pred_rnn, mse_ffnn, mse_rnn, ffnn_model, rnn_model
 end
 
 # Run the experiment
-pred_ffnn, pred_rnn, mse_ffnn, mse_rnn = run_experiment(seed)
+pred_ffnn, pred_rnn, mse_ffnn, mse_rnn, ffnn_model, rnn_model = run_experiment(seed)
 
 # Plotting
 plot(normalized_sunspots[train_zs+1:end], label="Actual Data", title="Sunspot Predictions", xlabel="Time", ylabel="Normalized Sunspots")
 plot!(pred_ffnn, label="FFNN Predictions")
 plot!(pred_rnn, label="RNN Predictions")
-
 savefig("sunspot_predictions.png")
 
 println("FFNN MSE: ", mse_ffnn)
 println("RNN MSE: ", mse_rnn)
+
+# Final precision verification
+final_input = reshape([normalized_sunspots[end]], 1, 1)
+ffnn_final_pred = vec(ffnn_model(final_input))[1]
+Flux.reset!(rnn_model)
+rnn_final_pred = vec(rnn_model(final_input))[1]
+
+println("Final actual value: ", final_value)
+println("FFNN final prediction: ", ffnn_final_pred)
+println("RNN final prediction: ", rnn_final_pred)
+println("FFNN final error: ", abs(final_value - ffnn_final_pred))
+println("RNN final error: ", abs(final_value - rnn_final_pred))
+println("FFNN final precision: ", 1 - abs(final_value - ffnn_final_pred))
+println("RNN final precision: ", 1 - abs(final_value - rnn_final_pred))
